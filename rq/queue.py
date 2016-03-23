@@ -19,6 +19,9 @@ def get_failed_queue(connection=None):
     """Returns a handle to the special failed queue."""
     return FailedQueue(connection=connection)
 
+def get_finished_queue(connection=None):
+    """Returns a handle to the special failed queue."""
+    return FinishedQueue(connection=connection)
 
 def compact(lst):
     return [item for item in lst if item is not None]
@@ -459,3 +462,24 @@ class FailedQueue(Queue):
         job.exc_info = None
         q = Queue(job.origin, connection=self.connection)
         q.enqueue_job(job)
+
+class FinishedQueue(Queue):
+    def __init__(self, connection=None):
+        super(FinishedQueue, self).__init__(JobStatus.FINISHED, connection=connection)
+
+    def quarantine(self, job):
+        """Puts the given Job in quarantine (i.e. put it on the finished
+        queue).
+        """
+
+        with self.connection._pipeline() as pipeline:
+            # Add Queue key set
+            self.connection.sadd(self.redis_queues_keys, self.key)
+
+            job.ended_at = utcnow()
+            job.save(pipeline=pipeline)
+
+            self.push_job_id(job.id, pipeline=pipeline)
+            pipeline.execute()
+
+        return job

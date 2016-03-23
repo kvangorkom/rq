@@ -21,7 +21,7 @@ from .defaults import DEFAULT_RESULT_TTL, DEFAULT_WORKER_TTL
 from .exceptions import DequeueTimeout
 from .job import Job, JobStatus
 from .logutils import setup_loghandlers
-from .queue import Queue, get_failed_queue
+from .queue import Queue, get_failed_queue, get_finished_queue
 from .registry import FinishedJobRegistry, StartedJobRegistry, clean_registries
 from .suspension import is_suspended
 from .timeouts import UnixSignalDeathPenalty
@@ -161,6 +161,7 @@ class Worker(object):
         self._stop_requested = False
         self.log = logger
         self.failed_queue = get_failed_queue(connection=self.connection)
+        self.finished_queue = get_finished_queue(connection=self.connection)
         self.last_cleaned_at = None
 
         # By default, push the "move-to-failed-queue" exception handler onto
@@ -605,6 +606,8 @@ class Worker(object):
                     finished_job_registry = FinishedJobRegistry(job.origin, self.connection)
                     finished_job_registry.add(job, result_ttl, pipeline)
 
+                    self.move_to_finished_queue(job)
+
                 job.cleanup(result_ttl, pipeline=pipeline)
                 started_job_registry.remove(job, pipeline=pipeline)
 
@@ -665,6 +668,11 @@ class Worker(object):
         exc_string = ''.join(traceback.format_exception(*exc_info))
         self.log.warning('Moving job to {0!r} queue'.format(self.failed_queue.name))
         self.failed_queue.quarantine(job, exc_info=exc_string)
+
+    def move_to_finished_queue(self, job):
+        """Default exception handler: move the job to the failed queue."""
+        self.log.warning('Moving job to {0!r} queue'.format(self.finished_queue.name))
+        self.finished_queue.quarantine(job)
 
     def push_exc_handler(self, handler_func):
         """Pushes an exception handler onto the exc handler stack."""
